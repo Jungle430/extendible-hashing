@@ -216,14 +216,14 @@ where
         }
     }
 
-    pub fn del(&mut self, key: &K) -> Option<Node<K, V>> {
+    pub fn del(&mut self, key: &K) -> Option<(K, V)> {
         let hash_code = Self::hash_code(key);
         let directory_index = self.get_directory_index(hash_code);
         let mut bucket = self.buckets[directory_index].borrow_mut();
         match bucket.del(key, hash_code) {
             Some(node) => {
                 self.size -= 1;
-                Some(node)
+                Some((node.key, node.value))
             }
             None => None,
         }
