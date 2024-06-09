@@ -135,6 +135,21 @@ where
         self.depth += 1;
     }
 
+    fn shrink(&mut self) {
+        self.depth -= 1;
+        let mut new_elems = vec![None; 1 << self.depth];
+        let mut index = 0;
+
+        for opt_elem in self.elems.iter_mut() {
+            if opt_elem.is_some() {
+                new_elems[index] = opt_elem.take();
+                index += 1;
+            }
+        }
+
+        self.elems = new_elems;
+    }
+
     fn contain(&self, key: &K, hash_code: u64) -> bool {
         for elem in self.elems.iter() {
             if let Some(elem) = elem {
@@ -148,6 +163,16 @@ where
 }
 
 const DIRECTORY_DEFAULT_INIT_GLOBAL_DEPTH: usize = 3;
+
+const DIRECTORY_MERGE_LOAD_FACTOR_BIT_MIN: usize = 1 << 1;
+
+const DIRECTORY_MERGE_LOAD_FACTOR_BIT: usize = 3;
+
+const _: () = {
+    if DIRECTORY_MERGE_LOAD_FACTOR_BIT < DIRECTORY_MERGE_LOAD_FACTOR_BIT_MIN {
+        panic!("DIRECTORY_MERGE_LOAD_FACTOR_BIT must be greater than 1");
+    }
+};
 
 struct DirectoryPage<K, V>
 where
@@ -219,10 +244,14 @@ where
     pub fn del(&mut self, key: &K) -> Option<(K, V)> {
         let hash_code = Self::hash_code(key);
         let directory_index = self.get_directory_index(hash_code);
-        let mut bucket = self.buckets[directory_index].borrow_mut();
-        match bucket.del(key, hash_code) {
+        let res = {
+            let mut bucket = self.buckets[directory_index].borrow_mut();
+            bucket.del(key, hash_code)
+        };
+        match res {
             Some(node) => {
                 self.size -= 1;
+                self.try_merge(directory_index);
                 Some((node.key, node.value))
             }
             None => None,
@@ -322,8 +351,49 @@ where
         }
     }
 
+    fn try_merge(&mut self, bucket_no: usize) {
+        let local_depth = self.buckets[bucket_no].borrow().depth;
+        let pair_index = Self::pair_index(bucket_no, local_depth);
+        let pair_index_local_path = self.buckets[pair_index].borrow().depth;
+        let size = self.buckets[bucket_no].borrow().size;
+        let pair_index_size = self.buckets[pair_index].borrow().size;
+
+        if local_depth == pair_index
+            && (size >> DIRECTORY_MERGE_LOAD_FACTOR_BIT) < (1 << local_depth)
+            && (pair_index_size >> DIRECTORY_MERGE_LOAD_FACTOR_BIT) < (1 << pair_index_local_path)
+        {
+            for opt_elem in self.buckets[pair_index].borrow_mut().elems.iter_mut() {
+                if opt_elem.is_some() {
+                    let Node {
+                        key,
+                        value,
+                        hash_code,
+                    } = opt_elem.take().unwrap();
+                    let _ = self.buckets[bucket_no]
+                        .borrow_mut()
+                        .put(key, value, hash_code);
+                }
+            }
+            self.buckets[bucket_no].borrow_mut().size += pair_index_size;
+            self.buckets[bucket_no].borrow_mut().shrink();
+
+            let new_bucket = self.buckets[bucket_no].clone();
+            let mask = (1 << local_depth) - 1;
+
+            for (index, bucket) in self.buckets.iter_mut().enumerate() {
+                if index & mask == pair_index & mask && bucket.borrow().depth == local_depth {
+                    *bucket = new_bucket.clone();
+                }
+            }
+        }
+    }
+
     fn len(&self) -> usize {
         self.size
+    }
+
+    fn is_empty(&self) -> bool {
+        self.size == 0
     }
 }
 
@@ -535,5 +605,52 @@ mod directory_page_test {
         for i in 10000..20000 {
             assert_eq!(directory_page.get(&format!("key{}", i + 1)), None);
         }
+    }
+
+    #[test]
+    fn test_directory_page_contain() {
+        let mut directory_page: DirectoryPage<String, String> = DirectoryPage::default();
+        directory_page.put(format!("key"), format!("value"));
+        assert!(directory_page.contain(&format!("key")));
+
+        let mut directory_page: DirectoryPage<String, String> = DirectoryPage::default();
+        for i in 0..10000 {
+            directory_page.put(format!("key{}", i + 1), format!("value{}", i + 1));
+        }
+        for i in 0..10000 {
+            assert!(directory_page.contain(&format!("key{}", i + 1)));
+        }
+        for i in 10000..20000 {
+            assert!(!directory_page.contain(&format!("key{}", i + 1)));
+        }
+    }
+
+    #[test]
+    fn test_directory_page_del() {
+        let mut directory_page: DirectoryPage<String, String> = DirectoryPage::default();
+        directory_page.put(format!("key"), format!("value"));
+        assert!(directory_page.contain(&format!("key")));
+        assert_eq!(
+            directory_page.del(&format!("key")),
+            Some((format!("key"), format!("value")))
+        );
+        assert_eq!(directory_page.len(), 0);
+        assert!(directory_page.is_empty());
+        assert!(!directory_page.contain(&format!("key")));
+
+        let mut directory_page: DirectoryPage<String, String> = DirectoryPage::default();
+        for i in 0..10000 {
+            directory_page.put(format!("key{}", i + 1), format!("value{}", i + 1));
+        }
+
+        for i in 0..10000 {
+            assert_eq!(
+                directory_page.del(&format!("key{}", i + 1)),
+                Some((format!("key{}", i + 1), format!("value{}", i + 1)))
+            );
+            assert_eq!(directory_page.len(), 10000 - i - 1);
+            assert!(!directory_page.contain(&format!("key{}", i + 1)));
+        }
+        assert!(directory_page.is_empty());
     }
 }
