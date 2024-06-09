@@ -12,3 +12,7 @@
 
 
 ```
+
+- This project is a Rust library implementing an [extendible hashing](https://en.wikipedia.org/wiki/Extendible_hashing), utilizing the extendible hashing algorithm. It employs a three-level structure, where the high-order bits of the hash code determine the position of slots in the first level. The slots in the first level point to a page, while the low-order bits of the hash code determine the position of elements within the page. A page's position points to a hash bucket. The buckets undergo splitting and merging based on the number of elements, reducing the need for hash table resizing. This helps to alleviate I/O pressure, making it particularly suitable for high I/O scenarios such as databases.
+
+![Extendible Hashing](/static/extendible-htable-structure.svg)
