@@ -1,6 +1,6 @@
 # Extendible Hashing
 
-![Rust](https://img.shields.io/badge/Extendible_Hashing-Rust-informational?style=flat-square&logo=rust&logoColor=white&color=2bbc8a)
+![Rust](https://img.shields.io/badge/Rust-informational?style=for-the-badge&logo=rust&logoColor=white&color=000000)
 
 ```shell
  _____        _                     _  _  _      _         _   _              _       _   ____               _   
